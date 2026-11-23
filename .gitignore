@@ -1,0 +1,28 @@
+# macOS & Windows metadata
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+
+# Secure Boot private keys & machine certificates
+*.key
+*.pem
+*.cer
+*.crt
+*.esl
+*.p12
+*.pfx
+private/
+
+# Local EFI / personal SMBIOS / proprietary firmware & binaries
+EFI-local/
+EFI/
+config.plist
+*.bin
+*.efi
+*.kext/
+*.kc
+*.log
+*.zip
+*.tar.gz
+*.dmg

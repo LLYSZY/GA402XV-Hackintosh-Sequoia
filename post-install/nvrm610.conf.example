@@ -1,0 +1,13 @@
+# NullMoth NVMTL runtime configuration for ASUS ROG Zephyrus G14 GA402XV (RTX 4060 Laptop)
+# Copy to /Library/GPUBundles/nvmtl/nvrm610.conf after verifying your driver version.
+
+NVMTL_VRAM_WS_NONIMAGE_MB=0
+NVMTL_VRAM_HEADROOM_MB=256
+NVMTL_RES2_WS=1
+NVMTL_GSUB_HOSTPTR_LIFT=1
+NVMTL_NAK_ARR_SCRATCH=0
+
+# --- Keep NVENC disabled on unsupported paths; preserve across NullMoth updates ---
+NVMTL_NO_NVENC=1
+NVMTL_NO_NVENC_HEVC=1
+# --- End custom settings ---

@@ -1,0 +1,86 @@
+--- a/src/phxbringup/PhxBringup.cpp
++++ b/src/phxbringup/PhxBringup.cpp
+@@ -19,7 +19,8 @@
+ #include <libkern/OSAtomic.h>
+ #include <pexpert/pexpert.h>
+ #include <sys/sysctl.h>
+-#include <kern/thread_call.h>
++#include <IOKit/IOWorkLoop.h>
++#include <IOKit/IOTimerEventSource.h>
+ #include <kern/clock.h>
+ 
+ #include "PhxNativeABI.h"
+@@ -202,9 +203,10 @@
+     uint64_t *vmPte(VmCtx &c, uint64_t va, bool alloc);
+     void vmFlushTlb(uint32_t vmid) const;
+     void ringPut(GpuQueue &q, uint32_t idx, uint32_t value);
+-    thread_call_t hangCall{nullptr};
++    IOWorkLoop *hangLoop{nullptr};
++    IOTimerEventSource *hangTimer{nullptr};
+     volatile bool hangStop{false};
+-    static void hangTick(thread_call_param_t self, thread_call_param_t);
++    static void hangTick(OSObject *owner, IOTimerEventSource *sender);
+     void hangCheck();
+     void killWaves(uint32_t vmid, bool all);
+     bool debug{false};
+@@ -360,23 +362,31 @@
+     setProperty("phx-fb-aper-len", fbAperLen, 64);
+     IOLog("PhxBringup: service up (mmio %s, bar0 %s %llu MiB, debug %d)\n", mmio ? "mapped" : "unmapped",
+           fbAper ? "mapped" : "unmapped", (unsigned long long)(fbAperLen >> 20), debug);
+-    hangCall = thread_call_allocate(hangTick, this);
+-    if (hangCall) {
+-        uint64_t d;
+-        clock_interval_to_deadline(500, kMillisecondScale, &d);
+-        thread_call_enter_delayed(hangCall, d);
++    hangLoop = IOWorkLoop::workLoop();
++    hangTimer = IOTimerEventSource::timerEventSource(this, hangTick);
++    if (!hangLoop || !hangTimer || hangLoop->addEventSource(hangTimer) != kIOReturnSuccess) {
++        OSSafeReleaseNULL(hangTimer);
++        OSSafeReleaseNULL(hangLoop);
++        stop(provider);
++        return false;
+     }
++    hangStop = false;
++    hangTimer->setTimeoutMS(500);
+     registerService();
+     return true;
+ }
+ 
+ void PhxBringup::stop(IOService *provider) {
+-    if (hangCall) {
+-        hangStop = true;   // a tick running now does not arm the next one
+-        thread_call_cancel_wait(hangCall);
+-        thread_call_free(hangCall);
+-        hangCall = nullptr;
++    if (hangTimer && hangLoop) {
++        // removeEventSource synchronizes with work-loop callbacks before MMIO is released.
++        hangTimer->disable();
++        hangTimer->cancelTimeout();
++        hangLoop->removeEventSource(hangTimer);
++        hangTimer->cancelTimeout();
+     }
++    hangStop = true;
++    OSSafeReleaseNULL(hangTimer);
++    OSSafeReleaseNULL(hangLoop);
+     if (gSysctlUp) {
+         sysctl_unregister_oid(&sysctl__debug_phxbos_flush);
+         sysctl_unregister_oid(&sysctl__debug_phxbos_flush_bytes);
+@@ -926,14 +936,11 @@
+ 
+ // Every 500 ms: a queue with unfinished work whose fence has not moved for debug.phx_hang_ms has the waves of its oldest
+ // unfinished submission killed, the CP then finishes that submission as if it had ended and the queue moves on.
+-void PhxBringup::hangTick(thread_call_param_t self, thread_call_param_t) {
+-    PhxBringup *me = static_cast<PhxBringup *>(self);
++void PhxBringup::hangTick(OSObject *owner, IOTimerEventSource *sender) {
++    auto *me = OSDynamicCast(PhxBringup, owner);
++    if (!me || me->hangStop) return;
+     me->hangCheck();
+-    if (me->hangStop)
+-        return;
+-    uint64_t d;
+-    clock_interval_to_deadline(500, kMillisecondScale, &d);
+-    thread_call_enter_delayed(me->hangCall, d);
++    sender->setTimeoutMS(500);
+ }
+ 
+ void PhxBringup::hangCheck() {
